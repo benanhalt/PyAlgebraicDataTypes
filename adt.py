@@ -1,40 +1,48 @@
 from collections import OrderedDict, namedtuple
 
-class Constraint:
-    def check(self, value):
-        return True
+class Ignore(namedtuple('Ignore', 'etype')):
+    __slots__ = ()
+    def __enter__(self):
+        pass
+    def __exit__(self, etype, evalue, traceback):
+        return etype is None or issubclass(etype, self.etype)
 
-Anything = Constraint
-
-class Require(Constraint):
-    def __init__(self, adtype):
-        self.adtype = adtype
-
-    def check(self, value):
-        if not isinstance(self.adtype, type) or \
-               not issubclass(self.adtype, Algebraic):
-            self.adtype = globals()[self.adtype]
-        if not self.adtype.isntit(value):
-            raise TypeError("Expected type %s, got %s" %
-                            (self.adtype, value.__class__))
-
-class VariantMeta(type):
-    class Singleton:
-        def __new__(cls):
-            try:
-                return cls._instance
-            except AttributeError:
-                cls._instance = super().__new__(cls)
+class Singleton:
+    __slots__ = ()
+    def __new__(cls):
+        try:
             return cls._instance
+        except AttributeError:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
+class Constraint:
+    pass
+
+class Anything(Constraint, Singleton):
+    def check(self, value):
+        pass
+
+class Require(Constraint, namedtuple('Required', 'dtype')):
+    __slots__ =( )
+    def check(self, value):
+        if not isinstance(value, self.dtype):
+            raise TypeError("expected type %s, got %s" %
+                            (self.dtype, value.__class__))
+
+class AlgebraicMeta(type):
     @classmethod
     def __prepare__(metacls, name, bases):
         return OrderedDict()
 
     def __new__(metacls, name, bases, clsdict):
         if bases == ():
-            return type.__new__(metacls, name, bases, clsdict)
+            return super().__new__(metacls, name, bases, clsdict)
+        if bases[0] is Algebraic:
+            clsdict['_variants'] = []
+            return super().__new__(metacls, name, bases, clsdict)
 
+        # making a variant
         fields = [key for key, value in clsdict.items()
                   if isinstance(value, Constraint)]
 
@@ -44,11 +52,15 @@ class VariantMeta(type):
 
         bases = ( namedtuple(name + 'Tuple', fields), ) + bases
         if len(fields) < 1:
-            bases = ( metacls.Singleton, ) + bases
+            bases = ( Singleton, ) + bases
+        cls = type.__new__(metacls, name, bases, clsdict)
+        cls._variants.append(cls)
+        return cls
 
-        return type.__new__(metacls, name, bases, clsdict)
+class Algebraic(metaclass=AlgebraicMeta):
+    def __new__(cls, *args, **kwargs):
+        raise TypeError("can't instantiate")
 
-class Variant(metaclass=VariantMeta):
     def __init__(self, *args, **kwargs):
         for field, constraint in zip(self._fields, self._constraints):
             value = getattr(self, field)
@@ -57,41 +69,12 @@ class Variant(metaclass=VariantMeta):
             else:
                 constraint.check(value)
 
-class Algebraic:
-    @classmethod
-    def isntit(cls, value):
-        variants = [v for v in cls.__dict__.values()
-                    if isinstance(v, type) and issubclass(v, Variant)]
-        return any(isinstance(value, variant) for variant in variants)
-
-class List(Algebraic):
-    class Nil(Variant):
-        pass
-
-    class Cons(Variant):
-        car = Anything()
-        cdr = Require('List')
-
-class Tree(Algebraic):
-    class Empty(Variant):
-        pass
-
-    class Node(Variant):
-        value = Anything()
-        left = Require('Tree')
-        right = Require('Tree')
-
-class Binding:
-    def __init__(self, name=None):
-        self.name = name
-
+class Binding(str):
     def __repr__(self):
-        return 'Binding("%s")' % self.name
+        return 'Binding(%r)' % str(self)
 
     def bind(self, value):
-        if self.name is None:
-            return {}
-        return {self.name: value}
+        return {} if self == "" else {self: value}
 
 class MatchFailed(Exception):
     pass
@@ -107,7 +90,15 @@ def match(pattern, value):
     if isinstance(pattern, Binding):
         return pattern.bind(value)
 
-    if isinstance(pattern, Variant):
+    if isinstance(pattern, type) and issubclass(pattern, Algebraic):
+        if not hasattr(pattern, '_fields'):
+            raise TypeError("can't match against generic type %r" % pattern)
+        if not isinstance(value, pattern):
+            raise MatchFailed("expected %r, got %r" %
+                              (pattern, value))
+        return value._asdict()
+
+    if isinstance(pattern, Algebraic):
         if not isinstance(value, pattern.__class__):
             raise MatchFailed("expected %r, got %r" %
                               (pattern, value))
@@ -143,12 +134,62 @@ def match(pattern, value):
 
     raise MatchFailed("%r didn't match %r" % (value, pattern))
 
-empty = Tree.Empty()
+class CasesExhausted(Exception):
+    pass
 
-tree = Tree.Node(4,
-                 Tree.Node(2, empty, empty),
-                 Tree.Node(5, Tree.Node(6, empty, empty), empty))
+def match_cases(value, *pattern_cases):
+    for pattern, action in pattern_cases:
+        with Ignore(MatchFailed):
+            bindings = match(pattern, value)
+            break
+    else:
+        raise CasesExhausted()
+    return action(**bindings)
 
-pattern = Tree.Node(Binding("v"), Binding("l"), Binding("r"))
+class Expr(Algebraic):
+    pass
 
-print(match(pattern, tree))
+class Num(Expr):
+    value = Require(int)
+
+class Add(Expr):
+    lhs = Require(Expr)
+    rhs = Require(Expr)
+
+
+class List(Algebraic):
+    def __iter__(self):
+        t = self
+        while True:
+            try:
+                car, t = match(Cons, t)
+                yield car
+            except MatchFailed:
+                break
+
+
+class Nil(List):
+    pass
+
+class Cons(List):
+    car = Anything()
+    cdr = Require(List)
+
+class Tree(Algebraic):
+    pass
+
+class Leaf(Tree):
+    value = Anything()
+
+class Node(Tree):
+    left = Require(Tree)
+    right = Require(Tree)
+
+lst = Cons(1, Cons(2, Cons(3, Nil())))
+
+print(lst)
+
+pattern = Cons(Binding('a'), Cons(Binding('b'), Binding('c')))
+
+print(match(pattern, lst))
+
