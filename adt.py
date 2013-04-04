@@ -1,4 +1,6 @@
 from collections import OrderedDict, namedtuple
+from itertools import zip_longest
+import inspect
 
 class Ignore(namedtuple('Ignore', 'etype')):
     __slots__ = ()
@@ -24,7 +26,7 @@ class Anything(Constraint, Singleton):
         pass
 
 class Require(Constraint, namedtuple('Required', 'dtype')):
-    __slots__ =( )
+    __slots__ = ()
     def check(self, value):
         if not isinstance(value, self.dtype):
             raise TypeError("expected type %s, got %s" %
@@ -41,8 +43,8 @@ class AlgebraicMeta(type):
         if bases[0] is Algebraic:
             clsdict['_variants'] = []
             return super().__new__(metacls, name, bases, clsdict)
+        # else making a variant
 
-        # making a variant
         fields = [key for key, value in clsdict.items()
                   if isinstance(value, Constraint)]
 
@@ -118,14 +120,16 @@ def match(pattern, value):
             result.update(recur(pattern[key], value[key]))
         return result
 
-    if hasattr(pattern, '__len__'):
-        if not hasattr(value, '__len__'):
+    if hasattr(pattern, '__iter__'):
+        if not hasattr(value, '__iter__'):
             raise MatchFailed("can't match sequence with %r" % value)
-        if len(pattern) != len(value):
-            raise MatchFailed("can't match length %d pattern with "
-                              "length %d value" % (len(pattern), len(value)))
+
         result = {}
-        for subpattern, subvalue in zip(pattern, value):
+        sentinel = object()
+        for subpattern, subvalue in zip_longest(pattern, value,
+                                                fillvalue=sentinel):
+            if sentinel in (subpattern, subvalue):
+                raise MatchFailed("pattern and value had different lengths")
             result.update(recur(subpattern, subvalue))
         return result
 
@@ -158,11 +162,11 @@ class Add(Expr):
 
 
 class List(Algebraic):
-    def __iter__(self):
+    def iterator(self):
         t = self
         while True:
             try:
-                car, t = match(Cons, t)
+                car, t = match(Cons, t).values()
                 yield car
             except MatchFailed:
                 break
@@ -175,8 +179,37 @@ class Cons(List):
     car = Anything()
     cdr = Require(List)
 
+class Match(namedtuple('Match', 'pattern, value')):
+    def __enter__(self):
+        return lambda: match(self.pattern, self.value)
+    def __exit__(self, etype, evalue, traceback):
+        return etype is None or issubclass(etype, MatchFailed)
+
+
+class MatchCases:
+    @classmethod
+    def run(cls, value):
+        cases = [v for v in cls.__dict__.values() if callable(v)]
+        for case in cases:
+            argspec = inspect.getfullargspec(case)
+            pattern = argspec.annotations[argspec.args[0]]
+            with Match(pattern, value) as match:
+                return case(match())
+        raise CasesExhausted('no case for %r' % (value, ))
+
+
 class Tree(Algebraic):
-    pass
+    def iterator(self):
+        with Match(Node, self) as match:
+            left, right = match().values()
+            yield from left.iterator()
+            yield from right.iterator()
+            return
+        with Match(Leaf, self) as match:
+            value, = match().values()
+            yield value
+            return
+        raise Exception
 
 class Leaf(Tree):
     value = Anything()
@@ -184,6 +217,16 @@ class Leaf(Tree):
 class Node(Tree):
     left = Require(Tree)
     right = Require(Tree)
+
+class TreeIterator(MatchCases):
+    def node(match : Node):
+        left, right = match.values()
+        yield from TreeIterator.run(left)
+        yield from TreeIterator.run(right)
+
+    def leaf(match : Leaf):
+        value, = match.values()
+        yield value
 
 lst = Cons(1, Cons(2, Cons(3, Nil())))
 
@@ -193,3 +236,15 @@ pattern = Cons(Binding('a'), Cons(Binding('b'), Binding('c')))
 
 print(match(pattern, lst))
 
+tree = Node(Leaf(1), Node(Node(Leaf(2), Leaf(3)), Leaf(4)))
+
+print(list(TreeIterator.run(tree)))
+
+class ListIterator(MatchCases):
+    def nil(match: Nil):
+        raise StopIteration
+    def cons(match: Cons):
+        yield match['car']
+        yield from ListIterator.run(match['cdr'])
+
+print(list(ListIterator.run(lst)))
