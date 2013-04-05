@@ -1,6 +1,7 @@
 from collections import OrderedDict, namedtuple
 from itertools import zip_longest
 import inspect
+import ast
 
 class Ignore(namedtuple('Ignore', 'etype')):
     __slots__ = ()
@@ -72,6 +73,11 @@ class Algebraic(metaclass=AlgebraicMeta):
                 constraint.check(value)
 
 class Binding(str):
+    def __init__(self, *args, **kwargs):
+        super().__init__(self, *args, **kwargs)
+        if not self.isidentifier():
+            raise TypeError("not a valid Python identifier: %r" % str(self))
+
     def __repr__(self):
         return 'Binding(%r)' % str(self)
 
@@ -185,66 +191,103 @@ class Match(namedtuple('Match', 'pattern, value')):
     def __exit__(self, etype, evalue, traceback):
         return etype is None or issubclass(etype, MatchFailed)
 
+def get_pattern(func):
+    if not callable(func): return None
+    argspec = inspect.getfullargspec(func)
+    if len(argspec) < 1: return None
+    try:
+        return argspec.annotations[argspec.args[0]]
+    except KeyError:
+        return None
 
-class MatchCases:
+class MatchCasesMeta(type):
     @classmethod
-    def run(cls, value):
-        cases = [v for v in cls.__dict__.values() if callable(v)]
-        for case in cases:
-            argspec = inspect.getfullargspec(case)
-            pattern = argspec.annotations[argspec.args[0]]
+    def __prepare__(metacls, name, bases):
+        return OrderedDict()
+
+    def __new__(metacls, name, bases, clsdict):
+        if bases is ():
+            return type.__new__(metacls, name, bases, clsdict)
+        cases = [(name, func, ptrn)
+                 for name, func in clsdict.items()
+                 for ptrn in [ get_pattern(func) ]
+                 if ptrn is not None]
+        for n, f, p in cases: del clsdict[n]
+        clsdict['_cases'] = cases
+        return type.__new__(metacls, name, bases, clsdict)
+
+class MatchCases(metaclass=MatchCasesMeta):
+    def __new__(cls, value):
+        for name, func, pattern in cls._cases:
             with Match(pattern, value) as match:
-                return case(match())
-        raise CasesExhausted('no case for %r' % (value, ))
+                bindings = match()
+                break
+        else:
+            raise CasesExhausted('no case for %r' % (value, ))
+
+        if len(bindings) < 1:
+            return func(value)
+
+        funcast = ast.parse(inspect.getsource(func).strip())
+        funcargs = funcast.body[0].args
+        funcargs.args = [ast.arg(funcargs.args[0].arg, None)]
+        funcargs.args.extend(ast.arg(name, None) for name in bindings.keys())
+        env = dict()
+        if len(func.__code__.co_freevars) < 1:
+            exec(compile(funcast, '<generated>', 'exec'), globals(), env)
+            newfunc = env[name]
+        else:
+            freevars = ', '.join(func.__code__.co_freevars)
+            wrapper = ast.parse("def wrapper(%s):\n"
+                                "  def %s(): pass\n"
+                                "  return %s" % (freevars, name, name))
+            wrapperfunc = wrapper.body[0]
+            wrapperfunc.body[0] = funcast.body[0]
+            exec(compile(wrapper, '<generated>', 'exec'), globals(), env)
+            newfunc = env['wrapper'](*[c.cell_contents
+                                       for c in func.__closure__])
+
+        return newfunc(value, **bindings)
 
 
-class Tree(Algebraic):
-    def iterator(self):
-        with Match(Node, self) as match:
-            left, right = match().values()
-            yield from left.iterator()
-            yield from right.iterator()
-            return
-        with Match(Leaf, self) as match:
-            value, = match().values()
-            yield value
-            return
-        raise Exception
+def wrapped(scale):
 
-class Leaf(Tree):
-    value = Anything()
+    class Tree(Algebraic):
+        pass
 
-class Node(Tree):
-    left = Require(Tree)
-    right = Require(Tree)
+    class Leaf(Tree):
+        value = Anything()
 
-class TreeIterator(MatchCases):
-    def node(match : Node):
-        left, right = match.values()
-        yield from TreeIterator.run(left)
-        yield from TreeIterator.run(right)
+    class Node(Tree):
+        left = Require(Tree)
+        right = Require(Tree)
 
-    def leaf(match : Leaf):
-        value, = match.values()
-        yield value
+    class TreeIterator(MatchCases):
+        def node(match : Node):
+            for v in TreeIterator(left): yield v
+            for v in TreeIterator(right): yield v
+
+        def leaf(match : Leaf):
+            yield scale*value
+
+    tree = Node(Leaf(1), Node(Node(Leaf(2), Leaf(3)), Leaf(4)))
+    return tree, TreeIterator
+tree, TreeIterator = wrapped(5)
+
+
 
 lst = Cons(1, Cons(2, Cons(3, Nil())))
 
-print(lst)
-
 pattern = Cons(Binding('a'), Cons(Binding('b'), Binding('c')))
 
-print(match(pattern, lst))
 
-tree = Node(Leaf(1), Node(Node(Leaf(2), Leaf(3)), Leaf(4)))
-
-print(list(TreeIterator.run(tree)))
+# print(list(TreeIterator.run(tree)))
 
 class ListIterator(MatchCases):
     def nil(match: Nil):
         raise StopIteration
     def cons(match: Cons):
-        yield match['car']
-        yield from ListIterator.run(match['cdr'])
+        yield car
+        for v in ListIterator(cdr): yield v
 
-print(list(ListIterator.run(lst)))
+# print(list(ListIterator.run(lst)))
