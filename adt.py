@@ -227,26 +227,69 @@ def get_pattern(func):
     except KeyError:
         return None
 
+Case = namedtuple('Case', 'name action pattern')
+
 class MatchCasesMeta(type):
     @classmethod
     def __prepare__(metacls, name, bases):
         return OrderedDict()
 
-    def __new__(metacls, name, bases, clsdict):
+    def __new__(metacls, clsname, bases, clsdict):
         if bases is ():
-            return type.__new__(metacls, name, bases, clsdict)
+            return type.__new__(metacls, clsname, bases, clsdict)
         cases = [(name, func, ptrn)
                  for name, func in clsdict.items()
                  for ptrn in [ get_pattern(func) ]
                  if ptrn is not None]
         for n, f, p in cases: del clsdict[n]
         clsdict['_cases'] = cases
-        return type.__new__(metacls, name, bases, clsdict)
+        return type.__new__(metacls, clsname, bases, clsdict)
+
+
+    def __init__(cls, name, bases, clsdict):
+        if hasattr(cls, '_cases'):
+            cls._cases = [cls.make_case(*c) for c in cls._cases]
+
+    def make_case(cls, name, func, ptrn):
+        args = BindingExtractor().extract(ptrn)
+        action = cls.add_binding_args_to_func(args, func)
+        return Case(name, action, ptrn)
+
+    def add_binding_args_to_func(cls, args, func):
+        if len(args) < 1:
+            return func
+
+        funcast = ast.parse(inspect.getsource(func).strip())
+        funcname = funcast.body[0].name
+        funcargs = funcast.body[0].args
+        funcargs.args = [ast.arg(funcargs.args[0].arg, None)]
+        funcargs.args.extend(ast.arg(name, None) for name in args)
+        env = dict()
+        if len(func.__code__.co_freevars) < 1:
+            exec(compile(funcast, '<generated>', 'exec'), globals(), env)
+            newfunc = env[funcname]
+        else:
+            freevars = list(func.__code__.co_freevars)
+            closurevals = [cls if var == cls.__name__ else cell.cell_contents
+                           for var, cell in zip(freevars, func.__closure__)]
+            wrapperargs = ', '.join(freevars)
+            wrapper = ast.parse("def wrapper(%s):\n"
+                                "  def %s(): pass\n"
+                                "  return %s" % (wrapperargs, funcname, funcname))
+            wrapperfunc = wrapper.body[0]
+            wrapperfunc.body[0] = funcast.body[0]
+            exec(compile(wrapper, '<generated>', 'exec'), globals(), env)
+            try:
+                newfunc = env['wrapper'](*closurevals)
+            except ValueError:
+                print(freevars, func.__closure__)
+                raise
+        return newfunc
 
 class MatchCases(metaclass=MatchCasesMeta):
     def __new__(cls, value):
         value = Match(value)
-        for name, func, pattern in cls._cases:
+        for name, action, pattern in cls._cases:
             try:
                 bindings = value.match(pattern)
                 break
@@ -255,29 +298,7 @@ class MatchCases(metaclass=MatchCasesMeta):
         else:
             raise CasesExhausted('no case for %r' % (value, ))
 
-        if len(bindings) < 1:
-            return func(value)
-
-        funcast = ast.parse(inspect.getsource(func).strip())
-        funcargs = funcast.body[0].args
-        funcargs.args = [ast.arg(funcargs.args[0].arg, None)]
-        funcargs.args.extend(ast.arg(name, None) for name in bindings.keys())
-        env = dict()
-        if len(func.__code__.co_freevars) < 1:
-            exec(compile(funcast, '<generated>', 'exec'), globals(), env)
-            newfunc = env[name]
-        else:
-            freevars = ', '.join(func.__code__.co_freevars)
-            wrapper = ast.parse("def wrapper(%s):\n"
-                                "  def %s(): pass\n"
-                                "  return %s" % (freevars, name, name))
-            wrapperfunc = wrapper.body[0]
-            wrapperfunc.body[0] = funcast.body[0]
-            exec(compile(wrapper, '<generated>', 'exec'), globals(), env)
-            newfunc = env['wrapper'](*[c.cell_contents
-                                       for c in func.__closure__])
-
-        return newfunc(value, **bindings)
+        return action(value, **bindings)
 
 def wrapped(scale):
 
