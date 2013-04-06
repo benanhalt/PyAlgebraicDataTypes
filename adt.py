@@ -1,5 +1,5 @@
 from collections import OrderedDict, namedtuple
-from itertools import zip_longest
+from itertools import zip_longest, chain
 import inspect
 import ast
 
@@ -87,74 +87,107 @@ class Binding(str):
 class MatchFailed(Exception):
     pass
 
-def match(pattern, value):
-    def recur(subpattern, subvalue):
-        try:
-            return match(subpattern, subvalue)
-        except MatchFailed as failure:
-            raise MatchFailed("%r didn't match %r" % (value, pattern)) \
-                  from failure
-
+def traverse(pattern, handle):
     if isinstance(pattern, Binding):
-        return pattern.bind(value)
+        return handle.binding(pattern)
 
     if isinstance(pattern, type) and issubclass(pattern, Algebraic):
         if not hasattr(pattern, '_fields'):
             raise TypeError("can't match against generic type %r" % pattern)
-        if not isinstance(value, pattern):
-            raise MatchFailed("expected %r, got %r" %
-                              (pattern, value))
-        return value._asdict()
+        return handle.adt_constructor(pattern)
 
     if isinstance(pattern, Algebraic):
-        if not isinstance(value, pattern.__class__):
-            raise MatchFailed("expected %r, got %r" %
-                              (pattern, value))
-        result = {}
-        for subpattern, subvalue in zip(pattern, value):
-            result.update(recur(subpattern, subvalue))
-        return result
+        return handle.adt_variant(pattern)
 
     if hasattr(pattern, 'keys') and hasattr(pattern, 'values'):
-        if not hasattr(value, 'keys') or not hasattr(value, 'values'):
-            raise MatchFailed("can't match mapping type pattern with %r"
-                              % value)
-        result = {}
-        for key in pattern:
-            if key not in value:
-                raise MatchFailed("pattern has key %r not in value" % key)
-            result.update(recur(pattern[key], value[key]))
-        return result
+        return handle.mapping(pattern)
 
     if hasattr(pattern, '__iter__'):
-        if not hasattr(value, '__iter__'):
-            raise MatchFailed("can't match sequence with %r" % value)
+        return handle.sequence(pattern)
+
+    return handle.value(pattern)
+
+class BindingExtractor:
+    def extract(self, pattern):
+        return traverse(pattern, self)
+
+    def binding(self, binding):
+        return binding
+
+    def adt_constructor(self, ctr):
+        return ctr._fields
+
+    def adt_variant(self, variant):
+        return self.sequence(variant)
+
+    def mapping(self, map):
+        return self.sequence(map.values())
+
+    def sequence(self, seq):
+        return chain(*(self.extract(value) for value in seq))
+
+class Match:
+    def __init__(self, value):
+        self.value = value
+
+    def match(self, pattern):
+        return traverse(pattern, self)
+
+    def recur(self, subpattern, subvalue):
+        try:
+            return self.match(subpattern, subvalue)
+        except MatchFailed as failure:
+            raise MatchFailed("%r didn't match %r" % (value, pattern)) \
+                  from failure
+
+    def binding(self, binding):
+        return binding.bind(self.value)
+
+    def adt_constructor(self, ctr):
+        if not isinstance(self.value, ctr):
+            raise MatchFailed("expected %r, got %r" %
+                              (ctr, self.value))
+        return self.value._asdict()
+
+    def adt_variant(self, variant):
+        if not isinstance(self.value, variant.__class__):
+            raise MatchFailed("expected %r, got %r" %
+                              (variant, self.value))
+        result = {}
+        for subpattern, subvalue in zip(variant, self.value):
+            result.update(self.recur(subpattern, subvalue))
+        return result
+
+    def mapping(self, map):
+        if not hasattr(self.value, 'keys') or not hasattr(self.value, 'values'):
+            raise MatchFailed("can't match mapping type pattern with %r"
+                              % self.value)
+        result = {}
+        for key in map:
+            if key not in self.value:
+                raise MatchFailed("pattern has key %r not in value" % key)
+            result.update(self.recur(map[key], self.value[key]))
+        return result
+
+    def sequence(self, seq):
+        if not hasattr(self.value, '__iter__'):
+            raise MatchFailed("can't match sequence with %r" % self.value)
 
         result = {}
         sentinel = object()
-        for subpattern, subvalue in zip_longest(pattern, value,
+        for subpattern, subvalue in zip_longest(seq, self.value,
                                                 fillvalue=sentinel):
             if sentinel in (subpattern, subvalue):
                 raise MatchFailed("pattern and value had different lengths")
-            result.update(recur(subpattern, subvalue))
+            result.update(self.recur(subpattern, subvalue))
         return result
 
-    if value == pattern:
-        return {}
-
-    raise MatchFailed("%r didn't match %r" % (value, pattern))
+    def value(self, v):
+        if self.value != pattern:
+            raise MatchFailed("%r didn't match %r" % (value, pattern))
 
 class CasesExhausted(Exception):
     pass
-
-def match_cases(value, *pattern_cases):
-    for pattern, action in pattern_cases:
-        with Ignore(MatchFailed):
-            bindings = match(pattern, value)
-            break
-    else:
-        raise CasesExhausted()
-    return action(**bindings)
 
 class Expr(Algebraic):
     pass
@@ -185,12 +218,6 @@ class Cons(List):
     car = Anything()
     cdr = Require(List)
 
-class Match(namedtuple('Match', 'pattern, value')):
-    def __enter__(self):
-        return lambda: match(self.pattern, self.value)
-    def __exit__(self, etype, evalue, traceback):
-        return etype is None or issubclass(etype, MatchFailed)
-
 def get_pattern(func):
     if not callable(func): return None
     argspec = inspect.getfullargspec(func)
@@ -218,10 +245,13 @@ class MatchCasesMeta(type):
 
 class MatchCases(metaclass=MatchCasesMeta):
     def __new__(cls, value):
+        value = Match(value)
         for name, func, pattern in cls._cases:
-            with Match(pattern, value) as match:
-                bindings = match()
+            try:
+                bindings = value.match(pattern)
                 break
+            except MatchFailed:
+                pass
         else:
             raise CasesExhausted('no case for %r' % (value, ))
 
@@ -248,7 +278,6 @@ class MatchCases(metaclass=MatchCasesMeta):
                                        for c in func.__closure__])
 
         return newfunc(value, **bindings)
-
 
 def wrapped(scale):
 
