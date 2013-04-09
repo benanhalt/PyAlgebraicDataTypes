@@ -74,7 +74,6 @@ class Algebraic(metaclass=AlgebraicMeta):
 
 class Binding(str):
     def __init__(self, *args, **kwargs):
-        super().__init__(self, *args, **kwargs)
         if not self.isidentifier():
             raise TypeError("not a valid Python identifier: %r" % str(self))
 
@@ -83,6 +82,9 @@ class Binding(str):
 
     def bind(self, value):
         return {} if self == "" else {self: value}
+
+class BindingRest(Binding):
+    pass
 
 class MatchFailed(Exception):
     pass
@@ -105,7 +107,7 @@ def traverse(pattern, handle):
     if hasattr(pattern, '__iter__'):
         return handle.sequence(pattern)
 
-    return handle.value(pattern)
+    return handle.literal(pattern)
 
 class BindingExtractor:
     def extract(self, pattern):
@@ -126,6 +128,9 @@ class BindingExtractor:
     def sequence(self, seq):
         return chain(*(self.extract(value) for value in seq))
 
+    def literal(self, value):
+        return []
+
 class Match:
     def __init__(self, value):
         self.value = value
@@ -134,8 +139,9 @@ class Match:
         return traverse(pattern, self)
 
     def recur(self, subpattern, subvalue):
+        submatch = self.__class__(subvalue)
         try:
-            return self.match(subpattern, subvalue)
+            return submatch.match(subpattern)
         except MatchFailed as failure:
             raise MatchFailed("%r didn't match %r" % (value, pattern)) \
                   from failure
@@ -175,16 +181,30 @@ class Match:
 
         result = {}
         sentinel = object()
+        rest_acc = None
         for subpattern, subvalue in zip_longest(seq, self.value,
                                                 fillvalue=sentinel):
+            if isinstance(subpattern, BindingRest):
+                rest_acc = []
+                result.update(subpattern.bind(rest_acc))
+                subpattern = sentinel
+            if rest_acc is not None:
+                if subpattern is not sentinel:
+                    raise ValueError("rest binding must be last value in "
+                                     "a sequence pattern.")
+                if subvalue is sentinel:
+                    break
+                rest_acc.append(subvalue)
+                continue
             if sentinel in (subpattern, subvalue):
                 raise MatchFailed("pattern and value had different lengths")
             result.update(self.recur(subpattern, subvalue))
         return result
 
-    def value(self, v):
-        if self.value != pattern:
-            raise MatchFailed("%r didn't match %r" % (value, pattern))
+    def literal(self, value):
+        if self.value != value:
+            raise MatchFailed("%r didn't match %r" % (self.value, value))
+        return {}
 
 class CasesExhausted(Exception):
     pass
@@ -341,3 +361,5 @@ class ListIterator(MatchCases):
         for v in ListIterator(cdr): yield v
 
 # print(list(ListIterator.run(lst)))
+
+Match([1,2,3,4]).match([1,2,3,Binding('a')])
