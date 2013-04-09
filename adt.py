@@ -2,6 +2,7 @@ from collections import OrderedDict, namedtuple
 from itertools import zip_longest, chain
 import inspect
 import ast
+import re
 
 class Ignore(namedtuple('Ignore', 'etype')):
     __slots__ = ()
@@ -101,6 +102,12 @@ def traverse(pattern, handle):
     if isinstance(pattern, Algebraic):
         return handle.adt_variant(pattern)
 
+    if isinstance(pattern, re._pattern_type):
+        return handle.regexp(pattern)
+
+    if isinstance(pattern, str):
+        return handle.literal(pattern)
+
     if hasattr(pattern, 'keys') and hasattr(pattern, 'values'):
         return handle.mapping(pattern)
 
@@ -110,6 +117,8 @@ def traverse(pattern, handle):
     return handle.literal(pattern)
 
 class BindingExtractor:
+    named_group_re = re.compile(r'\(\?P<([^>]+)>')
+
     def extract(self, pattern):
         return traverse(pattern, self)
 
@@ -121,6 +130,9 @@ class BindingExtractor:
 
     def adt_variant(self, variant):
         return self.sequence(variant)
+
+    def regexp(self, pattern):
+        return self.named_group_re.findall(pattern.pattern)
 
     def mapping(self, map):
         return self.sequence(map.values())
@@ -163,6 +175,13 @@ class Match:
         for subpattern, subvalue in zip(variant, self.value):
             result.update(self.recur(subpattern, subvalue))
         return result
+
+    def regexp(self, pattern):
+        match = pattern.match(self.value)
+        if match is None:
+            raise MatchFailed("regex %r didn't match %r" %
+                              (pattern.pattern, self.value))
+        return match.groupdict()
 
     def mapping(self, map):
         if not hasattr(self.value, 'keys') or not hasattr(self.value, 'values'):
