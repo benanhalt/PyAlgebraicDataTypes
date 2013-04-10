@@ -35,7 +35,7 @@ class AlgebraicMeta(type):
     def __new__(metacls, name, bases, clsdict):
         if bases == ():
             return super().__new__(metacls, name, bases, clsdict)
-        if bases[0] is Algebraic:
+        if bases[0] is ADT:
             clsdict['_variants'] = []
             return super().__new__(metacls, name, bases, clsdict)
         # else making a variant
@@ -54,7 +54,7 @@ class AlgebraicMeta(type):
         cls._variants.append(cls)
         return cls
 
-class Algebraic(metaclass=AlgebraicMeta):
+class ADT(metaclass=AlgebraicMeta):
     def __new__(cls, *args, **kwargs):
         raise TypeError("can't instantiate")
 
@@ -87,12 +87,12 @@ def traverse(pattern, handle):
     if isinstance(pattern, Binding):
         return handle.binding(pattern)
 
-    if isinstance(pattern, type) and issubclass(pattern, Algebraic):
+    if isinstance(pattern, type) and issubclass(pattern, ADT):
         if not hasattr(pattern, '_fields'):
             raise TypeError("can't match against generic type %r" % pattern)
         return handle.adt_constructor(pattern)
 
-    if isinstance(pattern, Algebraic):
+    if isinstance(pattern, ADT):
         return handle.adt_instance(pattern)
 
     if isinstance(pattern, re._pattern_type):
