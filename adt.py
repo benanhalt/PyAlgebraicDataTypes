@@ -4,13 +4,6 @@ import inspect
 import ast
 import re
 
-class Ignore(namedtuple('Ignore', 'etype')):
-    __slots__ = ()
-    def __enter__(self):
-        pass
-    def __exit__(self, etype, evalue, traceback):
-        return etype is None or issubclass(etype, self.etype)
-
 class Singleton:
     __slots__ = ()
     def __new__(cls):
@@ -100,7 +93,7 @@ def traverse(pattern, handle):
         return handle.adt_constructor(pattern)
 
     if isinstance(pattern, Algebraic):
-        return handle.adt_variant(pattern)
+        return handle.adt_instance(pattern)
 
     if isinstance(pattern, re._pattern_type):
         return handle.regexp(pattern)
@@ -128,8 +121,8 @@ class BindingExtractor:
     def adt_constructor(self, ctr):
         return ctr._fields
 
-    def adt_variant(self, variant):
-        return self.sequence(variant)
+    def adt_instance(self, instance):
+        return self.sequence(instance)
 
     def regexp(self, pattern):
         return self.named_group_re.findall(pattern.pattern)
@@ -147,15 +140,15 @@ class Match:
     def __init__(self, value):
         self.value = value
 
-    def match(self, pattern):
+    def against(self, pattern):
         return traverse(pattern, self)
 
     def recur(self, subpattern, subvalue):
         submatch = self.__class__(subvalue)
         try:
-            return submatch.match(subpattern)
+            return submatch.against(subpattern)
         except MatchFailed as failure:
-            raise MatchFailed("%r didn't match %r" % (value, pattern)) \
+            raise MatchFailed("%r didn't match %r" % (subvalue, subpattern)) \
                   from failure
 
     def binding(self, binding):
@@ -167,12 +160,12 @@ class Match:
                               (ctr, self.value))
         return self.value._asdict()
 
-    def adt_variant(self, variant):
-        if not isinstance(self.value, variant.__class__):
+    def adt_instance(self, instance):
+        if not isinstance(self.value, instance.__class__):
             raise MatchFailed("expected %r, got %r" %
-                              (variant, self.value))
+                              (instance, self.value))
         result = {}
-        for subpattern, subvalue in zip(variant, self.value):
+        for subpattern, subvalue in zip(instance, self.value):
             result.update(self.recur(subpattern, subvalue))
         return result
 
@@ -228,35 +221,6 @@ class Match:
 class CasesExhausted(Exception):
     pass
 
-class Expr(Algebraic):
-    pass
-
-class Num(Expr):
-    value = Require(int)
-
-class Add(Expr):
-    lhs = Require(Expr)
-    rhs = Require(Expr)
-
-
-class List(Algebraic):
-    def iterator(self):
-        t = self
-        while True:
-            try:
-                car, t = match(Cons, t).values()
-                yield car
-            except MatchFailed:
-                break
-
-
-class Nil(List):
-    pass
-
-class Cons(List):
-    car = Anything()
-    cdr = Require(List)
-
 def get_pattern(func):
     if not callable(func): return None
     argspec = inspect.getfullargspec(func)
@@ -284,7 +248,6 @@ class MatchCasesMeta(type):
         clsdict['_cases'] = cases
         return type.__new__(metacls, clsname, bases, clsdict)
 
-
     def __init__(cls, name, bases, clsdict):
         if hasattr(cls, '_cases'):
             cls._cases = [cls.make_case(*c) for c in cls._cases]
@@ -305,7 +268,7 @@ class MatchCasesMeta(type):
         funcargs.args.extend(ast.arg(name, None) for name in args)
         env = dict()
         if len(func.__code__.co_freevars) < 1:
-            exec(compile(funcast, '<generated>', 'exec'), globals(), env)
+            exec(compile(funcast, '<generated>', 'exec'), func.__globals__, env)
             newfunc = env[funcname]
         else:
             freevars = list(func.__code__.co_freevars)
@@ -317,7 +280,7 @@ class MatchCasesMeta(type):
                                 "  return %s" % (wrapperargs, funcname, funcname))
             wrapperfunc = wrapper.body[0]
             wrapperfunc.body[0] = funcast.body[0]
-            exec(compile(wrapper, '<generated>', 'exec'), globals(), env)
+            exec(compile(wrapper, '<generated>', 'exec'), globals, env)
             try:
                 newfunc = env['wrapper'](*closurevals)
             except ValueError:
@@ -327,10 +290,10 @@ class MatchCasesMeta(type):
 
 class MatchCases(metaclass=MatchCasesMeta):
     def __new__(cls, value):
-        value = Match(value)
+        match = Match(value)
         for name, action, pattern in cls._cases:
             try:
-                bindings = value.match(pattern)
+                bindings = match.against(pattern)
                 break
             except MatchFailed:
                 pass
@@ -339,46 +302,3 @@ class MatchCases(metaclass=MatchCasesMeta):
 
         return action(value, **bindings)
 
-def wrapped(scale):
-
-    class Tree(Algebraic):
-        pass
-
-    class Leaf(Tree):
-        value = Anything()
-
-    class Node(Tree):
-        left = Require(Tree)
-        right = Require(Tree)
-
-    class TreeIterator(MatchCases):
-        def node(match : Node):
-            for v in TreeIterator(left): yield v
-            for v in TreeIterator(right): yield v
-
-        def leaf(match : Leaf):
-            yield scale*value
-
-    tree = Node(Leaf(1), Node(Node(Leaf(2), Leaf(3)), Leaf(4)))
-    return tree, TreeIterator
-tree, TreeIterator = wrapped(5)
-
-
-
-lst = Cons(1, Cons(2, Cons(3, Nil())))
-
-pattern = Cons(Binding('a'), Cons(Binding('b'), Binding('c')))
-
-
-# print(list(TreeIterator.run(tree)))
-
-class ListIterator(MatchCases):
-    def nil(match: Nil):
-        raise StopIteration
-    def cons(match: Cons):
-        yield car
-        for v in ListIterator(cdr): yield v
-
-# print(list(ListIterator.run(lst)))
-
-Match([1,2,3,4]).match([1,2,3,Binding('a')])
