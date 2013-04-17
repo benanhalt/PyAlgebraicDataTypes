@@ -214,8 +214,15 @@ Ignore Bindings
 ```python
 >>> Match('foo').against(Binding(''))
 {}
->>> Match(range(10)).against((0, Binding('a'), BindingRest('')))
+>>> pattern = (0, Binding('a'), BindingRest(''))
+>>> Match(range(10)).against(pattern)
 {Binding('a'): 1}
+
+>>> def loop():
+...    while True:
+...       yield 0
+>>> Match(loop()).against(pattern)
+{Binding('a'): 0}
 
 ```
 

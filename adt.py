@@ -226,6 +226,11 @@ class Match:
         for subpattern, subvalue in zip_longest(seq, self.value,
                                                 fillvalue=sentinel):
             if isinstance(subpattern, BindingRest):
+                if rest_acc is not None:
+                    raise ValueError("only one rest binding may occur"
+                                     "in a sequence pattern.")
+                if subpattern == '':
+                    break
                 rest_acc = []
                 result.update(subpattern.bind(rest_acc))
                 subpattern = sentinel
