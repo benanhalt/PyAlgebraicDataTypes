@@ -68,7 +68,7 @@ class ADT(metaclass=AlgebraicMeta):
 
 class Binding(str):
     def __init__(self, *args, **kwargs):
-        if not self.isidentifier():
+        if not self.isidentifier() and self != '':
             raise TypeError("not a valid Python identifier: %r" % str(self))
 
     def __repr__(self):
@@ -94,6 +94,12 @@ def traverse(pattern, handle):
 
     if isinstance(pattern, ADT):
         return handle.adt_instance(pattern)
+
+    if isinstance(pattern, type) and issubclass(pattern, ast.AST):
+        return handle.ast_constructor(pattern)
+
+    if isinstance(pattern, ast.AST):
+        return handle.ast_instance(pattern)
 
     if isinstance(pattern, re._pattern_type):
         return handle.regexp(pattern)
@@ -123,6 +129,12 @@ class BindingExtractor:
 
     def adt_instance(self, instance):
         return self.sequence(instance)
+
+    def ast_constructor(self, ctr):
+        return ctr._fields
+
+    def ast_instance(self, instance):
+        return self.sequence(instance.__dict__.values())
 
     def regexp(self, pattern):
         return self.named_group_re.findall(pattern.pattern)
@@ -164,10 +176,25 @@ class Match:
         if not isinstance(self.value, instance.__class__):
             raise MatchFailed("expected %r, got %r" %
                               (instance, self.value))
-        result = {}
-        for subpattern, subvalue in zip(instance, self.value):
-            result.update(self.recur(subpattern, subvalue))
-        return result
+        return {k: v
+                for subpattern, subvalue in zip(instance, self.value)
+                for k, v in self.recur(subpattern, subvalue).items()}
+
+    def ast_constructor(self, ctr):
+        if not isinstance(self.value, ctr):
+            raise MatchFailed("expected %r, got %r" %
+                              (ctr, self.value))
+        return {field: getattr(self.value, field) for field in ctr._fields}
+
+    def ast_instance(self, instance):
+        if not isinstance(self.value, instance.__class__):
+            raise MatchFailed("expected %r, got %r" %
+                              (instance, self.value))
+        return {k: v
+                for field, subpattern in instance.__dict__.items()
+                for k, v in self.recur(
+                    subpattern, getattr(self.value, field)
+                    ).items()}
 
     def regexp(self, pattern):
         match = pattern.match(self.value)
@@ -180,12 +207,14 @@ class Match:
         if not hasattr(self.value, 'keys') or not hasattr(self.value, 'values'):
             raise MatchFailed("can't match mapping type pattern with %r"
                               % self.value)
-        result = {}
-        for key in map:
+        def recur(key):
             if key not in self.value:
                 raise MatchFailed("pattern has key %r not in value" % key)
-            result.update(self.recur(map[key], self.value[key]))
-        return result
+            return self.recur(map[key], self.value[key])
+
+        return {k: v
+                for key in map
+                for k, v in recur(key).items()}
 
     def sequence(self, seq):
         if not hasattr(self.value, '__iter__'):
@@ -281,11 +310,7 @@ class MatchCasesMeta(type):
             wrapperfunc = wrapper.body[0]
             wrapperfunc.body[0] = funcast.body[0]
             exec(compile(wrapper, '<generated>', 'exec'), globals, env)
-            try:
-                newfunc = env['wrapper'](*closurevals)
-            except ValueError:
-                print(freevars, func.__closure__)
-                raise
+            newfunc = env['wrapper'](*closurevals)
         return newfunc
 
 class MatchCases(metaclass=MatchCasesMeta):

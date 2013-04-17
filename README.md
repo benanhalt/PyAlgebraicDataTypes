@@ -180,6 +180,20 @@ pattern and value had different lengths
 
 ```
 
+Pattern Matching with ASTs
+--------------------------
+
+```python
+>>> import ast
+>>> an_ast = ast.parse('def square(t): return t*t')
+>>> pattern = ast.Module(body=[
+...    ast.FunctionDef(name=Binding('name'))
+... ])
+>>> Match(an_ast).against(pattern)
+{Binding('name'): 'square'}
+
+```
+
 Rest Bindings
 -------------
 When matching a sequence a rest binding can be used to
@@ -191,6 +205,17 @@ for destructuring long sequences.
 >>> from adt import BindingRest
 >>> Match(range(6)).against([0,1,2,BindingRest('rest')])
 {Binding('rest'): [3, 4, 5]}
+
+```
+
+Ignore Bindings
+--------------
+
+```python
+>>> Match('foo').against(Binding(''))
+{}
+>>> Match(range(10)).against((0, Binding('a'), BindingRest('')))
+{Binding('a'): 1}
 
 ```
 
