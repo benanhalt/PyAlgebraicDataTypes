@@ -122,7 +122,7 @@ class BindingExtractor:
         return traverse(pattern, self)
 
     def binding(self, binding):
-        return binding
+        return [binding]
 
     def adt_constructor(self, ctr):
         return ctr._fields
@@ -292,6 +292,7 @@ class MatchCasesMeta(type):
         return Case(name, action, ptrn)
 
     def add_binding_args_to_func(cls, args, func):
+        args = list(args)
         if len(args) < 1:
             return func
 
@@ -299,7 +300,7 @@ class MatchCasesMeta(type):
         funcname = funcast.body[0].name
         funcargs = funcast.body[0].args
         funcargs.args = [ast.arg(funcargs.args[0].arg, None)]
-        funcargs.args.extend(ast.arg(name, None) for name in args)
+        funcargs.args.extend(ast.arg(str(name), None) for name in args)
         env = dict()
         if len(func.__code__.co_freevars) < 1:
             exec(compile(funcast, '<generated>', 'exec'), func.__globals__, env)
@@ -328,7 +329,8 @@ class MatchCases(metaclass=MatchCasesMeta):
             except MatchFailed:
                 pass
         else:
-            raise CasesExhausted('no case for %r' % (value, ))
+            raise CasesExhausted('no case for %r in %r' %
+                                 (value, cls))
 
         return action(value, **bindings)
 
