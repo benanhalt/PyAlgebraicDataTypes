@@ -33,7 +33,7 @@ class AlgebraicMeta(type):
         return OrderedDict()
 
     def __new__(metacls, name, bases, clsdict):
-        if bases == ():
+        if bases is ():
             return super().__new__(metacls, name, bases, clsdict)
         if bases[0] is ADT:
             clsdict['_variants'] = []
@@ -84,7 +84,7 @@ class BindingRest(Binding):
 class MatchFailed(Exception):
     pass
 
-def traverse(pattern, handle):
+def dispatch(pattern, handle):
     if isinstance(pattern, Binding):
         return handle.binding(pattern)
 
@@ -118,7 +118,7 @@ def traverse(pattern, handle):
     return handle.literal(pattern)
 
 def extract_bindings(pattern):
-    return traverse(pattern, BindingExtractor())
+    return dispatch(pattern, BindingExtractor())
 
 class BindingExtractor(Singleton):
     named_group_re = re.compile(r'\(\?P<([^>]+)>')
@@ -148,13 +148,14 @@ class BindingExtractor(Singleton):
         return chain(*(extract_bindings(value) for value in seq))
 
     def literal(self, value):
-        return []
+        return ()
+
+def unzip(z):
+    return tuple(zip(*z)) or ((), ())
 
 def match(pattern, value):
-    fields, values = [], []
-    for k, v in traverse(pattern, MatchVisitor(value)):
-        fields.append(k)
-        values.append(v)
+    bindings = dispatch(pattern, MatchVisitor(value))
+    fields, values = unzip(bindings)
     return namedtuple('CapturedValues', fields)(*values)
 
 class MatchVisitor:
@@ -163,7 +164,7 @@ class MatchVisitor:
 
     def recur(self, subpattern, subvalue):
         try:
-            return traverse(subpattern, MatchVisitor(subvalue))
+            return dispatch(subpattern, MatchVisitor(subvalue))
         except MatchFailed as failure:
             raise MatchFailed("%r didn't match %r" %
                               (subvalue, subpattern)) from failure
@@ -210,11 +211,11 @@ class MatchVisitor:
                       key=lambda item: pattern.groupindex[item[0]])
 
     def mapping(self, map):
-        if not all((hasattr(self.value, attr)
-                    for attr in ('keys', 'values'))):
+        if not (hasattr(self.value, 'keys') and
+                hasattr(self.value, 'values')):
             raise MatchFailed("can't match mapping type pattern "
                               "with %r" % self.value)
-        def recur(key):
+        def check(key):
             if key not in self.value:
                 raise MatchFailed("pattern has key %r "
                                   "which is not in value" % key)
@@ -224,7 +225,7 @@ class MatchVisitor:
         if not isinstance(map, OrderedDict):
             keys = sorted(map.keys())
 
-        return chain.from_iterable(recur(key) for key in keys)
+        return chain.from_iterable(check(key) for key in keys)
 
     def sequence(self, seq):
         if not hasattr(self.value, '__iter__'):
