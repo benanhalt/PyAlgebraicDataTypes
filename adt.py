@@ -115,11 +115,11 @@ def traverse(pattern, handle):
 
     return handle.literal(pattern)
 
-class BindingExtractor:
-    named_group_re = re.compile(r'\(\?P<([^>]+)>')
+def extract_bindings(pattern):
+    return traverse(pattern, BindingExtractor())
 
-    def extract(self, pattern):
-        return traverse(pattern, self)
+class BindingExtractor(Singleton):
+    named_group_re = re.compile(r'\(\?P<([^>]+)>')
 
     def binding(self, binding):
         return [binding]
@@ -143,22 +143,21 @@ class BindingExtractor:
         return self.sequence(map.values())
 
     def sequence(self, seq):
-        return chain(*(self.extract(value) for value in seq))
+        return chain(*(extract_bindings(value) for value in seq))
 
     def literal(self, value):
         return []
 
-class Match:
+def match(pattern, value):
+    return traverse(pattern, MatchVisitor(value))
+
+class MatchVisitor:
     def __init__(self, value):
         self.value = value
 
-    def against(self, pattern):
-        return traverse(pattern, self)
-
     def recur(self, subpattern, subvalue):
-        submatch = self.__class__(subvalue)
         try:
-            return submatch.against(subpattern)
+            return match(subpattern, subvalue)
         except MatchFailed as failure:
             raise MatchFailed("%r didn't match %r" % (subvalue, subpattern)) \
                   from failure
@@ -287,7 +286,7 @@ class MatchCasesMeta(type):
             cls._cases = [cls.make_case(*c) for c in cls._cases]
 
     def make_case(cls, name, func, ptrn):
-        args = BindingExtractor().extract(ptrn)
+        args = extract_bindings(ptrn)
         action = cls.add_binding_args_to_func(args, func)
         return Case(name, action, ptrn)
 
@@ -321,10 +320,9 @@ class MatchCasesMeta(type):
 
 class MatchCases(metaclass=MatchCasesMeta):
     def __new__(cls, value):
-        match = Match(value)
         for name, action, pattern in cls._cases:
             try:
-                bindings = match.against(pattern)
+                bindings = match(pattern, value)
                 break
             except MatchFailed:
                 pass

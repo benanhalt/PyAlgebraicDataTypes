@@ -90,13 +90,13 @@ Cons(car=Binding('a'), cdr=Cons(car=Binding('b'), cdr=Binding('c')))
 
 >>> lst = Cons(1, Cons(2, Nil()))
 
->>> from adt import Match, MatchFailed
->>> result = Match(lst).against(pattern)
+>>> from adt import match, MatchFailed
+>>> result = match(pattern, lst)
 >>> result['a'], result['b'], result['c']
 (1, 2, Nil())
 
 >>> lst = Nil()
->>> Match(lst).against(Cons(b('car'), Nil()))
+>>> match(Cons(b('car'), Nil()), lst)
 Traceback (most recent call last):
 adt.MatchFailed: expected Cons(car=Binding('car'), cdr=Nil()), got Nil()
 
@@ -106,7 +106,7 @@ ADT constructors can stand in for pattern elments and
 automatically bind their arguments.
 
 ```python
->>> result = Match(Cons(1, Nil())).against(Cons)
+>>> result = match(Cons, Cons(1, Nil()))
 >>> sorted(result.items())
 [('car', 1), ('cdr', Nil())]
 
@@ -124,7 +124,7 @@ bind the matched vasues to the respective names.
 ...                      r"(?P<subscriber>\d{4})")
 
 >>> pattern = Cons(tele_re, b('a'))
->>> result = Match(Cons("123-456-7890", Nil())).against(pattern)
+>>> result = match(pattern, Cons("123-456-7890", Nil()))
 >>> sorted(result.items())
 [(Binding('a'), Nil()), ('area_code', '123'), ('exchange', '456'), ('subscriber', '7890')]
 
@@ -137,11 +137,11 @@ be matched against mapping types in the value.
 
 ```python
 >>> pattern = {'a': 1, 'list': Cons, 'foo': b('foo_value')}
->>> result = Match({'a': 1, 'list': Cons(1, Nil()), 'foo': 'bar', 'b': 2}).against(pattern)
+>>> result = match(pattern, {'a': 1, 'list': Cons(1, Nil()), 'foo': 'bar', 'b': 2})
 >>> sorted(result.items())
 [('car', 1), ('cdr', Nil()), (Binding('foo_value'), 'bar')]
 
->>> Match({'a': 1, 'foo': 2, 'b': 3}).against(pattern)
+>>> match(pattern, {'a': 1, 'foo': 2, 'b': 3})
 Traceback (most recent call last):
 adt.MatchFailed: pattern has key 'list' not in value
 
@@ -152,15 +152,15 @@ Pattern Matching with Sequence Types
 
 ```python
 >>> pattern = [1, b('second'), 3, b('fourth')]
->>> result = Match((1, 2, 3, 4)).against(pattern)
+>>> result = match(pattern, (1, 2, 3, 4))
 >>> result['second'], result['fourth']
 (2, 4)
 
->>> Match((1,2,3)).against(pattern)
+>>> match(pattern, (1,2,3))
 Traceback (most recent call last):
 adt.MatchFailed: pattern and value had different lengths
 
->>> Match("abcd").against(('a', 'b', 'c'))
+>>> match(('a', 'b', 'c'), "abcd")
 Traceback (most recent call last):
 adt.MatchFailed: pattern and value had different lengths
 
@@ -175,7 +175,7 @@ Pattern Matching with ASTs
 >>> pattern = ast.Module(body=[
 ...    ast.FunctionDef(name=Binding('name'))
 ... ])
->>> Match(an_ast).against(pattern)
+>>> match(pattern, an_ast)
 {Binding('name'): 'square'}
 
 ```
@@ -184,12 +184,12 @@ Rest Bindings
 -------------
 When matching a sequence, rest bindings can be used to
 capture all remaining elements of the sequence as a list.
-The resulting list is copied element by element, so this 
+The resulting list is copied element by element, so this
 is not recommended for destructuring long sequences.
 
 ```python
 >>> from adt import BindingRest
->>> Match(range(6)).against([0,1,2,BindingRest('rest')])
+>>> match([0,1,2,BindingRest('rest')], range(6))
 {Binding('rest'): [3, 4, 5]}
 
 ```
@@ -198,16 +198,16 @@ Ignore Bindings
 --------------
 
 ```python
->>> Match('foo').against(Binding(''))
+>>> match(Binding(''), 'foo')
 {}
 >>> pattern = (0, Binding('a'), BindingRest(''))
->>> Match(range(10)).against(pattern)
+>>> match(pattern, range(10))
 {Binding('a'): 1}
 
 >>> def loop():
 ...    while True:
 ...       yield 0
->>> Match(loop()).against(pattern)
+>>> match(pattern, loop())
 {Binding('a'): 0}
 
 ```
