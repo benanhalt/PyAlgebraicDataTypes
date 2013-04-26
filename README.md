@@ -187,14 +187,22 @@ CapturedValues(name='square')
 Rest Bindings
 -------------
 When matching a sequence, rest bindings can be used to
-capture all remaining elements of the sequence as a list.
-The resulting list is copied element by element, so this
-is not recommended for destructuring long sequences.
+capture all remaining elements of the sequence as an iterable.
 
 ```python
 >>> from adt import BindingRest
->>> match([0,1,2,BindingRest('rest')], range(6))
-CapturedValues(rest=[3, 4, 5])
+>>> pattern = [0,1,2,BindingRest('rest')]
+>>> result = match(pattern, range(6))
+>>> result # doctest: +ELLIPSIS
+CapturedValues(rest=<generator object rest at ...>)
+
+>>> list(result.rest)
+[3, 4, 5]
+
+>>> from itertools import islice
+>>> result = match(pattern, range(10**100))
+>>> list(islice(result.rest, 10))
+[3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 ```
 

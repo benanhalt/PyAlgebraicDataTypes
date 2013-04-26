@@ -222,30 +222,22 @@ class MatchVisitor:
             raise MatchFailed("can't match sequence with %r" % self.value)
 
         sentinel = object()
-        rest_acc = None
-        for subpattern, subvalue in zip_longest(seq, self.value,
-                                                fillvalue=sentinel):
+        pieces = zip_longest(seq, self.value, fillvalue=sentinel)
+
+        for subpattern, subvalue in pieces:
             if isinstance(subpattern, BindingRest):
-                if rest_acc is not None:
-                    raise ValueError("only one rest binding may occur"
-                                     "in a sequence pattern.")
-                if subpattern == '':
-                    break
-                rest_acc = subpattern.bind([])[0]
-                subpattern = sentinel
-            if rest_acc is not None:
-                if subpattern is not sentinel:
-                    raise ValueError("rest binding must be last value in "
-                                     "a sequence pattern.")
-                if subvalue is sentinel:
-                    break
-                rest_acc[1].append(subvalue)
-                continue
-            if sentinel in (subpattern, subvalue):
+                def rest():
+                    yield subvalue
+                    yield from (subvalue for subpattern, subvalue in pieces)
+
+                yield from subpattern.bind(rest())
+                break
+
+            elif sentinel in (subpattern, subvalue):
                 raise MatchFailed("pattern and value had different lengths")
-            yield from self.recur(subpattern, subvalue)
-        if rest_acc is not None:
-            yield rest_acc
+
+            else:
+                yield from self.recur(subpattern, subvalue)
 
     def literal(self, value):
         if self.value != value:
