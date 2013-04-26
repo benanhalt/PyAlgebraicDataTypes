@@ -1,7 +1,7 @@
 Algebraic Datatypes for Python
 ==============================
 This README can be run as a doctest:
-    $ python -m doctest README.md
+    `python -m doctest README.md`
 
 A List of Integers
 ------------------
@@ -81,10 +81,9 @@ TypeError: not a valid Python identifier: '3'
 
 Pattern Matching Algebraic Types
 --------------------------------
-For convenience, create a short name for the binding constructor.
 
 ```python
->>> b = Binding
+>>> b = Binding # A short name, for convenience.
 >>> pattern = Cons(b('a'), Cons(b('b'), b('c')))
 >>> pattern
 Cons(car=Binding('a'), cdr=Cons(car=Binding('b'), cdr=Binding('c')))
@@ -183,10 +182,10 @@ Pattern Matching with ASTs
 
 Rest Bindings
 -------------
-When matching a sequence a rest binding can be used to
+When matching a sequence, rest bindings can be used to
 capture all remaining elements of the sequence as a list.
-The resulting list is copied element, so this is not recommended
-for destructuring long sequences.
+The resulting list is copied element by element, so this 
+is not recommended for destructuring long sequences.
 
 ```python
 >>> from adt import BindingRest
