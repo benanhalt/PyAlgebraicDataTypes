@@ -1,9 +1,10 @@
 Algebraic Datatypes for Python
 ==============================
+This README can be run as a doctest:
+    $ python -m doctest README.md
 
-
-A List of Int
--------------
+A List of Integers
+------------------
 
 ```python
 >>> from adt import ADT, Require
@@ -20,11 +21,9 @@ A List of Int
 >>> Cons(1, Nil())
 Cons(car=1, cdr=Nil())
 
->>> try:
-...    Cons('foo', Nil())
-... except TypeError as e:
-...    print(e)
-expected type <class 'int'>, got <class 'str'>
+>>> Cons('foo', Nil())
+Traceback (most recent call last):
+TypeError: expected type <class 'int'>, got <class 'str'>
 
 ```
 
@@ -42,8 +41,8 @@ True
 
 ```
 
-A List of Anything
-------------------
+A Heterogeneous List
+--------------------
 ```python
 >>> from adt import Anything
 >>> class List(ADT):
@@ -59,11 +58,9 @@ A List of Anything
 >>> Cons('foo', Cons('bar', Nil()))
 Cons(car='foo', cdr=Cons(car='bar', cdr=Nil()))
 
->>> try:
-...     Cons(1, 2)
-... except TypeError as e:
-...     print(e)
-expected type <class '__main__.List'>, got <class 'int'>
+>>> Cons(1, 2)
+Traceback (most recent call last):
+TypeError: expected type <class '__main__.List'>, got <class 'int'>
 
 ```
 
@@ -76,11 +73,9 @@ Bindings are used to create patterns with named slots.
 >>> Binding('a')
 Binding('a')
 
->>> try:
-...    Binding('3')
-... except TypeError as e:
-...    print(e)
-not a valid Python identifier: '3'
+>>> Binding('3')
+Traceback (most recent call last):
+TypeError: not a valid Python identifier: '3'
 
 ```
 
@@ -102,11 +97,9 @@ Cons(car=Binding('a'), cdr=Cons(car=Binding('b'), cdr=Binding('c')))
 (1, 2, Nil())
 
 >>> lst = Nil()
->>> try:
-...    Match(lst).against(Cons(b('car'), Nil()))
-... except MatchFailed as e:
-...    print(e)
-expected Cons(car=Binding('car'), cdr=Nil()), got Nil()
+>>> Match(lst).against(Cons(b('car'), Nil()))
+Traceback (most recent call last):
+adt.MatchFailed: expected Cons(car=Binding('car'), cdr=Nil()), got Nil()
 
 ```
 
@@ -149,11 +142,9 @@ be matched against mapping types in the value.
 >>> sorted(result.items())
 [('car', 1), ('cdr', Nil()), (Binding('foo_value'), 'bar')]
 
->>> try:
-...    Match({'a': 1, 'foo': 2, 'b': 3}).against(pattern)
-... except MatchFailed as e:
-...    print(e)
-pattern has key 'list' not in value
+>>> Match({'a': 1, 'foo': 2, 'b': 3}).against(pattern)
+Traceback (most recent call last):
+adt.MatchFailed: pattern has key 'list' not in value
 
 ```
 
@@ -166,17 +157,13 @@ Pattern Matching with Sequence Types
 >>> result['second'], result['fourth']
 (2, 4)
 
->>> try:
-...    Match((1,2,3)).against(pattern)
-... except MatchFailed as e:
-...    print(e)
-pattern and value had different lengths
+>>> Match((1,2,3)).against(pattern)
+Traceback (most recent call last):
+adt.MatchFailed: pattern and value had different lengths
 
->>> try:
-...    Match("abcd").against(('a', 'b', 'c'))
-... except MatchFailed as e:
-...    print(e)
-pattern and value had different lengths
+>>> Match("abcd").against(('a', 'b', 'c'))
+Traceback (most recent call last):
+adt.MatchFailed: pattern and value had different lengths
 
 ```
 
