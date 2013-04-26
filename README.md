@@ -148,7 +148,7 @@ CapturedValues(foo_value='bar', car=1, cdr=Nil())
 
 >>> match(pattern, {'a': 1, 'foo': 2, 'b': 3})
 Traceback (most recent call last):
-adt.MatchFailed: pattern has key 'list' not in value
+adt.MatchFailed: pattern has key 'list' which is not in value
 
 ```
 

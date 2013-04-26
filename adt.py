@@ -69,7 +69,8 @@ class ADT(metaclass=AlgebraicMeta):
 class Binding(str):
     def __init__(self, *args, **kwargs):
         if not self.isidentifier() and self != '':
-            raise TypeError("not a valid Python identifier: %r" % str(self))
+            raise TypeError("not a valid Python identifier: %r" %
+                            str(self))
 
     def __repr__(self):
         return 'Binding(%r)' % str(self)
@@ -89,7 +90,8 @@ def traverse(pattern, handle):
 
     if isinstance(pattern, type) and issubclass(pattern, ADT):
         if not hasattr(pattern, '_fields'):
-            raise TypeError("can't match against generic type %r" % pattern)
+            raise TypeError("can't match against generic type %r" %
+                            pattern)
         return handle.adt_constructor(pattern)
 
     if isinstance(pattern, ADT):
@@ -163,8 +165,8 @@ class MatchVisitor:
         try:
             return traverse(subpattern, MatchVisitor(subvalue))
         except MatchFailed as failure:
-            raise MatchFailed("%r didn't match %r" % (subvalue, subpattern)) \
-                  from failure
+            raise MatchFailed("%r didn't match %r" %
+                              (subvalue, subpattern)) from failure
 
     def binding(self, binding):
         return binding.bind(self.value)
@@ -187,7 +189,8 @@ class MatchVisitor:
         if not isinstance(self.value, ctr):
             raise MatchFailed("expected %r, got %r" %
                               (ctr, self.value))
-        return ((field, getattr(self.value, field)) for field in ctr._fields)
+        return ((field, getattr(self.value, field))
+                for field in ctr._fields)
 
     def ast_instance(self, instance):
         if not isinstance(self.value, instance.__class__):
@@ -203,23 +206,30 @@ class MatchVisitor:
             raise MatchFailed("regex %r didn't match %r" %
                               (pattern.pattern, self.value))
         items = match.groupdict().items()
-        return sorted(items, key=lambda item: pattern.groupindex[item[0]])
+        return sorted(items,
+                      key=lambda item: pattern.groupindex[item[0]])
 
     def mapping(self, map):
-        if not hasattr(self.value, 'keys') or not hasattr(self.value, 'values'):
-            raise MatchFailed("can't match mapping type pattern with %r"
-                              % self.value)
+        if not all((hasattr(self.value, attr)
+                    for attr in ('keys', 'values'))):
+            raise MatchFailed("can't match mapping type pattern "
+                              "with %r" % self.value)
         def recur(key):
             if key not in self.value:
-                raise MatchFailed("pattern has key %r not in value" % key)
+                raise MatchFailed("pattern has key %r "
+                                  "which is not in value" % key)
             return self.recur(map[key], self.value[key])
 
-        keys = map.keys() if isinstance(map, OrderedDict) else sorted(map.keys())
+        keys = map.keys()
+        if not isinstance(map, OrderedDict):
+            keys = sorted(map.keys())
+
         return chain.from_iterable(recur(key) for key in keys)
 
     def sequence(self, seq):
         if not hasattr(self.value, '__iter__'):
-            raise MatchFailed("can't match sequence with %r" % self.value)
+            raise MatchFailed("can't match sequence with %r" %
+                              self.value)
 
         sentinel = object()
         pieces = zip_longest(seq, self.value, fillvalue=sentinel)
@@ -228,20 +238,22 @@ class MatchVisitor:
             if isinstance(subpattern, BindingRest):
                 def rest():
                     yield subvalue
-                    yield from (subvalue for subpattern, subvalue in pieces)
+                    yield from (value for __, value in pieces)
 
                 yield from subpattern.bind(rest())
                 break
 
             elif sentinel in (subpattern, subvalue):
-                raise MatchFailed("pattern and value had different lengths")
+                raise MatchFailed(
+                    "pattern and value had different lengths")
 
             else:
                 yield from self.recur(subpattern, subvalue)
 
     def literal(self, value):
         if self.value != value:
-            raise MatchFailed("%r didn't match %r" % (self.value, value))
+            raise MatchFailed("%r didn't match %r" %
+                              (self.value, value))
         return ()
 
 class CasesExhausted(Exception):
@@ -266,49 +278,52 @@ class MatchCasesMeta(type):
     def __new__(metacls, clsname, bases, clsdict):
         if bases is ():
             return type.__new__(metacls, clsname, bases, clsdict)
-        cases = [(name, func, ptrn)
+        cases = [Case(name, func, ptrn)
                  for name, func in clsdict.items()
                  for ptrn in [ get_pattern(func) ]
                  if ptrn is not None]
-        for n, f, p in cases: del clsdict[n]
+        for case in cases: del clsdict[case.name]
         clsdict['_cases'] = cases
         return type.__new__(metacls, clsname, bases, clsdict)
 
     def __init__(cls, name, bases, clsdict):
         if hasattr(cls, '_cases'):
-            cls._cases = [cls.make_case(*c) for c in cls._cases]
+            cls._cases = [cls.fixup_args(case) for case in cls._cases]
 
-    def make_case(cls, name, func, ptrn):
-        args = extract_bindings(ptrn)
-        action = cls.add_binding_args_to_func(args, func)
-        return Case(name, action, ptrn)
+    def fixup_args(cls, case):
+        args = tuple(extract_bindings(case.pattern))
+        if len(args) > 0:
+            action = cls.add_binding_args_to_func(args, case.action)
+            case = case._replace(action=action)
+        return case
 
     def add_binding_args_to_func(cls, args, func):
-        args = list(args)
-        if len(args) < 1:
-            return func
-
         funcast = ast.parse(inspect.getsource(func).strip())
         funcname = funcast.body[0].name
         funcargs = funcast.body[0].args
         funcargs.args = [ast.arg(funcargs.args[0].arg, None)]
-        funcargs.args.extend(ast.arg(str(name), None) for name in args)
+        funcargs.args.extend(ast.arg(str(a), None) for a in args)
         env = dict()
         if len(func.__code__.co_freevars) < 1:
-            exec(compile(funcast, '<generated>', 'exec'), func.__globals__, env)
+            exec(compile(funcast, '<generated>', 'exec'),
+                 func.__globals__, env)
             newfunc = env[funcname]
         else:
-            freevars = list(func.__code__.co_freevars)
-            closurevals = [cls if var == cls.__name__ else cell.cell_contents
-                           for var, cell in zip(freevars, func.__closure__)]
+            clsname = cls.__name__
+            freevars = tuple(func.__code__.co_freevars)
+            closvals = [cell.cell_contents if var != clsname else cls
+                        for var, cell in
+                        zip(freevars, func.__closure__)]
             wrapperargs = ', '.join(freevars)
             wrapper = ast.parse("def wrapper(%s):\n"
                                 "  def %s(): pass\n"
-                                "  return %s" % (wrapperargs, funcname, funcname))
+                                "  return %s" %
+                                (wrapperargs, funcname, funcname))
             wrapperfunc = wrapper.body[0]
             wrapperfunc.body[0] = funcast.body[0]
-            exec(compile(wrapper, '<generated>', 'exec'), globals, env)
-            newfunc = env['wrapper'](*closurevals)
+            exec(compile(wrapper, '<generated>', 'exec'),
+                 globals, env)
+            newfunc = env['wrapper'](*closvals)
         return newfunc
 
 class MatchCases(metaclass=MatchCasesMeta):
