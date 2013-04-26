@@ -75,7 +75,7 @@ class Binding(str):
         return 'Binding(%r)' % str(self)
 
     def bind(self, value):
-        return {} if self == "" else {self: value}
+        return () if self == "" else ((self, value), )
 
 class BindingRest(Binding):
     pass
@@ -149,7 +149,11 @@ class BindingExtractor(Singleton):
         return []
 
 def match(pattern, value):
-    return traverse(pattern, MatchVisitor(value))
+    fields, values = [], []
+    for k, v in traverse(pattern, MatchVisitor(value)):
+        fields.append(k)
+        values.append(v)
+    return namedtuple('CapturedValues', fields)(*values)
 
 class MatchVisitor:
     def __init__(self, value):
@@ -157,7 +161,7 @@ class MatchVisitor:
 
     def recur(self, subpattern, subvalue):
         try:
-            return match(subpattern, subvalue)
+            return traverse(subpattern, MatchVisitor(subvalue))
         except MatchFailed as failure:
             raise MatchFailed("%r didn't match %r" % (subvalue, subpattern)) \
                   from failure
@@ -169,38 +173,37 @@ class MatchVisitor:
         if not isinstance(self.value, ctr):
             raise MatchFailed("expected %r, got %r" %
                               (ctr, self.value))
-        return self.value._asdict()
+        return zip(ctr._fields, self.value)
 
     def adt_instance(self, instance):
         if not isinstance(self.value, instance.__class__):
             raise MatchFailed("expected %r, got %r" %
                               (instance, self.value))
-        return {k: v
-                for subpattern, subvalue in zip(instance, self.value)
-                for k, v in self.recur(subpattern, subvalue).items()}
+        return chain.from_iterable(
+            self.recur(subpattern, subvalue)
+            for subpattern, subvalue in zip(instance, self.value))
 
     def ast_constructor(self, ctr):
         if not isinstance(self.value, ctr):
             raise MatchFailed("expected %r, got %r" %
                               (ctr, self.value))
-        return {field: getattr(self.value, field) for field in ctr._fields}
+        return ((field, getattr(self.value, field)) for field in ctr._fields)
 
     def ast_instance(self, instance):
         if not isinstance(self.value, instance.__class__):
             raise MatchFailed("expected %r, got %r" %
                               (instance, self.value))
-        return {k: v
-                for field, subpattern in instance.__dict__.items()
-                for k, v in self.recur(
-                    subpattern, getattr(self.value, field)
-                    ).items()}
+        return chain.from_iterable(
+            self.recur(subpattern, getattr(self.value, field))
+            for field, subpattern in instance.__dict__.items())
 
     def regexp(self, pattern):
         match = pattern.match(self.value)
         if match is None:
             raise MatchFailed("regex %r didn't match %r" %
                               (pattern.pattern, self.value))
-        return match.groupdict()
+        items = match.groupdict().items()
+        return sorted(items, key=lambda item: pattern.groupindex[item[0]])
 
     def mapping(self, map):
         if not hasattr(self.value, 'keys') or not hasattr(self.value, 'values'):
@@ -211,15 +214,13 @@ class MatchVisitor:
                 raise MatchFailed("pattern has key %r not in value" % key)
             return self.recur(map[key], self.value[key])
 
-        return {k: v
-                for key in map
-                for k, v in recur(key).items()}
+        keys = map.keys() if isinstance(map, OrderedDict) else sorted(map.keys())
+        return chain.from_iterable(recur(key) for key in keys)
 
     def sequence(self, seq):
         if not hasattr(self.value, '__iter__'):
             raise MatchFailed("can't match sequence with %r" % self.value)
 
-        result = {}
         sentinel = object()
         rest_acc = None
         for subpattern, subvalue in zip_longest(seq, self.value,
@@ -230,8 +231,7 @@ class MatchVisitor:
                                      "in a sequence pattern.")
                 if subpattern == '':
                     break
-                rest_acc = []
-                result.update(subpattern.bind(rest_acc))
+                rest_acc = subpattern.bind([])[0]
                 subpattern = sentinel
             if rest_acc is not None:
                 if subpattern is not sentinel:
@@ -239,17 +239,18 @@ class MatchVisitor:
                                      "a sequence pattern.")
                 if subvalue is sentinel:
                     break
-                rest_acc.append(subvalue)
+                rest_acc[1].append(subvalue)
                 continue
             if sentinel in (subpattern, subvalue):
                 raise MatchFailed("pattern and value had different lengths")
-            result.update(self.recur(subpattern, subvalue))
-        return result
+            yield from self.recur(subpattern, subvalue)
+        if rest_acc is not None:
+            yield rest_acc
 
     def literal(self, value):
         if self.value != value:
             raise MatchFailed("%r didn't match %r" % (self.value, value))
-        return {}
+        return ()
 
 class CasesExhausted(Exception):
     pass
@@ -330,5 +331,5 @@ class MatchCases(metaclass=MatchCasesMeta):
             raise CasesExhausted('no case for %r in %r' %
                                  (value, cls))
 
-        return action(value, **bindings)
+        return action(value, **bindings._asdict())
 

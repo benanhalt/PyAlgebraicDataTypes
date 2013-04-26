@@ -91,9 +91,8 @@ Cons(car=Binding('a'), cdr=Cons(car=Binding('b'), cdr=Binding('c')))
 >>> lst = Cons(1, Cons(2, Nil()))
 
 >>> from adt import match, MatchFailed
->>> result = match(pattern, lst)
->>> result['a'], result['b'], result['c']
-(1, 2, Nil())
+>>> match(pattern, lst)
+CapturedValues(a=1, b=2, c=Nil())
 
 >>> lst = Nil()
 >>> match(Cons(b('car'), Nil()), lst)
@@ -106,9 +105,8 @@ ADT constructors can stand in for pattern elments and
 automatically bind their arguments.
 
 ```python
->>> result = match(Cons, Cons(1, Nil()))
->>> sorted(result.items())
-[('car', 1), ('cdr', Nil())]
+>>> match(Cons, Cons(1, Nil()))
+CapturedValues(car=1, cdr=Nil())
 
 ```
 
@@ -124,9 +122,8 @@ bind the matched vasues to the respective names.
 ...                      r"(?P<subscriber>\d{4})")
 
 >>> pattern = Cons(tele_re, b('a'))
->>> result = match(pattern, Cons("123-456-7890", Nil()))
->>> sorted(result.items())
-[(Binding('a'), Nil()), ('area_code', '123'), ('exchange', '456'), ('subscriber', '7890')]
+>>> match(pattern, Cons("123-456-7890", Nil()))
+CapturedValues(area_code='123', exchange='456', subscriber='7890', a=Nil())
 
 ```
 
@@ -135,11 +132,19 @@ Pattern Matching with Mapping Types
 Patterns can include dicts or other mapping types that will
 be matched against mapping types in the value.
 
+If the pattern is an ordered dictionary, values will be
+captured in the order given. Otherwise, the order will be
+determined by sorting the keys.
+
 ```python
+>>> from collections import OrderedDict
+>>> pattern = OrderedDict([('a', 1), ('list', Cons), ('foo', b('foo_value'))])
+>>> match(pattern, {'a': 1, 'list': Cons(1, Nil()), 'foo': 'bar', 'b': 2})
+CapturedValues(car=1, cdr=Nil(), foo_value='bar')
+
 >>> pattern = {'a': 1, 'list': Cons, 'foo': b('foo_value')}
->>> result = match(pattern, {'a': 1, 'list': Cons(1, Nil()), 'foo': 'bar', 'b': 2})
->>> sorted(result.items())
-[('car', 1), ('cdr', Nil()), (Binding('foo_value'), 'bar')]
+>>> match(pattern, {'a': 1, 'list': Cons(1, Nil()), 'foo': 'bar', 'b': 2})
+CapturedValues(foo_value='bar', car=1, cdr=Nil())
 
 >>> match(pattern, {'a': 1, 'foo': 2, 'b': 3})
 Traceback (most recent call last):
@@ -152,9 +157,8 @@ Pattern Matching with Sequence Types
 
 ```python
 >>> pattern = [1, b('second'), 3, b('fourth')]
->>> result = match(pattern, (1, 2, 3, 4))
->>> result['second'], result['fourth']
-(2, 4)
+>>> match(pattern, (1, 2, 3, 4))
+CapturedValues(second=2, fourth=4)
 
 >>> match(pattern, (1,2,3))
 Traceback (most recent call last):
@@ -176,7 +180,7 @@ Pattern Matching with ASTs
 ...    ast.FunctionDef(name=Binding('name'))
 ... ])
 >>> match(pattern, an_ast)
-{Binding('name'): 'square'}
+CapturedValues(name='square')
 
 ```
 
@@ -190,7 +194,7 @@ is not recommended for destructuring long sequences.
 ```python
 >>> from adt import BindingRest
 >>> match([0,1,2,BindingRest('rest')], range(6))
-{Binding('rest'): [3, 4, 5]}
+CapturedValues(rest=[3, 4, 5])
 
 ```
 
@@ -199,16 +203,17 @@ Ignore Bindings
 
 ```python
 >>> match(Binding(''), 'foo')
-{}
+CapturedValues()
+
 >>> pattern = (0, Binding('a'), BindingRest(''))
 >>> match(pattern, range(10))
-{Binding('a'): 1}
+CapturedValues(a=1)
 
 >>> def loop():
 ...    while True:
 ...       yield 0
 >>> match(pattern, loop())
-{Binding('a'): 0}
+CapturedValues(a=0)
 
 ```
 
