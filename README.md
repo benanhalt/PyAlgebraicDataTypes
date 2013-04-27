@@ -262,7 +262,7 @@ Match Cases
 
 Using metaclass magic and function annotations admits a construct
 similar in flavor to Racket's `type-case`. Subclasses of `MatchCases`
-analize their contained functions to collect a series of patterns to
+analyze their contained functions to collect a series of patterns to
 match. The patterns are given by the annotation on the first argument
 of each function. The patterns are tried in the order the functions
 are defined in the class. When a pattern is matched the corresponding
@@ -294,8 +294,8 @@ adt.CasesExhausted: no case for Cons(...) in <class '__main__.MissingCases'>
 
 ```
 
-Functions in a `MatchCases` class can exclude the second, captured
-values, argument. This triggers special behavior whereby the function
+Functions in a `MatchCases` class can exclude the second, `CapturedValues`, 
+argument. This triggers special behavior whereby the function
 is replaced by a dynamically generated version with arguments inserted
 for each captured value. This eliminates the need to repeat the names
 of the bindings from the pattern.
@@ -312,7 +312,7 @@ of the bindings from the pattern.
 
 ```
 
-Here another example with a binary tree ADT this time:
+Here's another example, with a binary tree ADT this time:
 
 ```python
 >>> class Tree(ADT): pass
