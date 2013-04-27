@@ -8,6 +8,8 @@ PyCon talk.
 
 This README can be run as a doctest:
     `python -m doctest README.md`
+    
+Python version 3.3 is required.
 
 A List of Integers
 ------------------
