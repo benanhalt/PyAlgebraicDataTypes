@@ -293,16 +293,18 @@ class MatchCasesMeta(type):
 
     def fixup_args(cls, case):
         args = tuple(extract_bindings(case.pattern))
-        if len(args) > 0:
+        wants_args_patched_in = case.action.__code__.co_argcount == 1
+        if len(args) > 0 and wants_args_patched_in:
             action = cls.add_binding_args_to_func(args, case.action)
             case = case._replace(action=action)
+        case.action.patch_in_args = wants_args_patched_in
         return case
 
     def add_binding_args_to_func(cls, args, func):
         funcast = ast.parse(inspect.getsource(func).strip())
         funcname = funcast.body[0].name
         funcargs = funcast.body[0].args
-        funcargs.args = [ast.arg(funcargs.args[0].arg, None)]
+        funcargs.args = [ ast.arg(funcargs.args[0].arg, None) ]
         funcargs.args.extend(ast.arg(str(a), None) for a in args)
         env = dict()
         if len(func.__code__.co_freevars) < 1:
@@ -339,5 +341,8 @@ class MatchCases(metaclass=MatchCasesMeta):
             raise CasesExhausted('no case for %r in %r' %
                                  (value, cls))
 
-        return action(value, **bindings._asdict())
+        if action.patch_in_args:
+            return action(value, **bindings._asdict())
+        else:
+            return action(value, bindings)
 

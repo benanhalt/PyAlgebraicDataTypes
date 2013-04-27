@@ -1,4 +1,4 @@
-from adt import Match, MatchCases, Binding as b, BindingRest as r
+from adt import match, MatchCases, Binding as b, BindingRest as r
 import ast
 
 class MatchMod(MatchCases):
