@@ -124,7 +124,7 @@ class BindingExtractor(Singleton):
     named_group_re = re.compile(r'\(\?P<([^>]+)>')
 
     def binding(self, binding):
-        return [binding]
+        return [] if binding == '' else [binding] 
 
     def adt_constructor(self, ctr):
         return ctr._fields
