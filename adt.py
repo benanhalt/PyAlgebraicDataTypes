@@ -350,5 +350,5 @@ class MatchCases(metaclass=MatchCasesMeta):
             return action(value, bindings)
 
 def ast_kwargs(Ctr, **kwargs):
-    return Ctr(*[kwargs.get(field, Binding(''))
+    return Ctr(*[kwargs.get(field, Binding(field))
                  for field in Ctr._fields])

@@ -1,4 +1,4 @@
-from adt import match, MatchCases, Binding as b, BindingRest as r, ast_kwargs
+from adt import match, MatchCases, Binding as b, BindingRest as r, ast_kwargs as kw
 import ast
 
 class MatchMod(MatchCases):
@@ -7,8 +7,8 @@ class MatchMod(MatchCases):
             yield from MatchStmt(stmt)
 
 class MatchArg(MatchCases):
-    def arg(match: ast.arg(b('name'), None)):
-        return name
+    def arg(match: kw(ast.arg, annotation=None)):
+        return arg
 
     def annotated(match: ast.arg):
         return '%s: %s' % (arg, MatchExpr(annotation))
@@ -36,10 +36,10 @@ class MatchKeyword(MatchCases):
         return '%s=%s' % (arg, MatchExpr(value))
 
 class MatchSlice(MatchCases):
-    def slice_end(match: ast.Slice(None, b('u'), b('s'))):
-        result = ['', MatchExpr(u)]
-        if s is not None:
-            result.append(MatchExpr(s))
+    def slice_end(match: kw(ast.Slice, lower=None)):
+        result = ['', MatchExpr(upper)]
+        if step is not None:
+            result.append(MatchExpr(step))
         return ':'.join(result)
 
     def slice_begin(match: ast.Slice):
@@ -116,8 +116,8 @@ class MatchExpr(MatchCases):
                       for op, c in zip(ops, comparators))
         return '(%s)' % ''.join(pieces)
 
-    def name(match: ast.Name(b('name'), b('ctx'))):
-        return name
+    def name(match: ast.Name):
+        return id
 
     def attribute(match: ast.Attribute):
         return MatchExpr(value) + '.' + attr
@@ -139,7 +139,7 @@ class MatchArguments(MatchCases):
         return ', '.join(arg_list)
 
 class MatchAlias(MatchCases):
-    def no_alias(match: ast.alias(b('name'), None)):
+    def no_alias(match: kw(ast.alias, asname=None)):
         return name
 
     def alias(match: ast.alias):
@@ -151,8 +151,8 @@ def make_body(body):
             for line in MatchStmt(stmt))
 
 class MatchStmt(MatchCases):
-    def assertstmt(match: ast_kwargs(ast.Assert, msg=None)):
-        yield 'assert %s' % ( MatchExpr(match.test) )
+    def assertstmt(match: kw(ast.Assert, msg=None)):
+        yield 'assert %s' % ( MatchExpr(test) )
 
     def assert_with_msg(match: ast.Assert):
         yield 'assert %s, %s' % (
@@ -215,7 +215,7 @@ class MatchStmt(MatchCases):
         yield MatchExpr(value)
 
 class MatchClassBases(MatchCases):
-    def empty(match: []):
+    def empty(match: ()):
         return ""
 
     def otherwise(match: b('bases')):
