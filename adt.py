@@ -200,8 +200,9 @@ class MatchVisitor:
             raise MatchFailed("expected %r, got %r" %
                               (instance, self.value))
         return chain.from_iterable(
-            self.recur(subpattern, getattr(self.value, field))
-            for field, subpattern in instance.__dict__.items())
+            self.recur(getattr(instance, field),
+                       getattr(self.value, field))
+            for field in instance._fields)
 
     def regexp(self, pattern):
         match = pattern.match(self.value)
@@ -348,3 +349,6 @@ class MatchCases(metaclass=MatchCasesMeta):
         else:
             return action(value, bindings)
 
+def ast_kwargs(Ctr, **kwargs):
+    return Ctr(*[kwargs.get(field, Binding(''))
+                 for field in Ctr._fields])

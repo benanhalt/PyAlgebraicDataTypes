@@ -1,4 +1,4 @@
-from adt import match, MatchCases, Binding as b, BindingRest as r
+from adt import match, MatchCases, Binding as b, BindingRest as r, ast_kwargs
 import ast
 
 class MatchMod(MatchCases):
@@ -30,6 +30,10 @@ def make_call_args(call):
     if call.kwargs is not None:
         arg_list.append('**(%s)' % MatchExpr(call.kwargs))
     return '(%s)' % ', '.join(arg_list)
+
+class MatchKeyword(MatchCases):
+    def keyword(match: ast.keyword):
+        return '%s=%s' % (arg, MatchExpr(value))
 
 class MatchSlice(MatchCases):
     def slice_end(match: ast.Slice(None, b('u'), b('s'))):
@@ -147,8 +151,8 @@ def make_body(body):
             for line in MatchStmt(stmt))
 
 class MatchStmt(MatchCases):
-    def assertstmt(match: ast.Assert(b('test'), None)):
-        yield 'assert %s' % ( MatchExpr(test) )
+    def assertstmt(match: ast_kwargs(ast.Assert, msg=None)):
+        yield 'assert %s' % ( MatchExpr(match.test) )
 
     def assert_with_msg(match: ast.Assert):
         yield 'assert %s, %s' % (
