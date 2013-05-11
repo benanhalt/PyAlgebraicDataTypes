@@ -2,13 +2,13 @@ Algebraic Datatypes and Pattern Matching for Python
 ===================================================
 
 This project was inspired by Racket's `define-type / type-case`
-mechanism and [David Beazley's 
-Metaprogramming](http://pyvideo.org/video/1716/python-3-metaprogramming) 
+mechanism and [David Beazley's
+Metaprogramming](http://pyvideo.org/video/1716/python-3-metaprogramming)
 PyCon talk.
 
 This README can be run as a doctest:
     `python -m doctest README.md`
-    
+
 Python version 3.3 is required.
 
 A List of Integers
@@ -242,20 +242,6 @@ CapturedValues(a=1)
 ...       yield 0
 >>> match(pattern, loop())
 CapturedValues(a=0)
-
-```
-
-Pattern Matching with ASTs
---------------------------
-
-```python
->>> import ast
->>> an_ast = ast.parse('def square(t): return t*t')
->>> pattern = ast.Module(body=[
-...    ast.FunctionDef(name=Binding('name'))
-... ])
->>> match(pattern, an_ast)
-CapturedValues(name='square')
 
 ```
 
