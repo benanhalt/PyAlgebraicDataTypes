@@ -21,7 +21,6 @@ import re
 
 class Singleton:
     """Mix-in for making singleton types."""
-    __slots__ = ()
     def __new__(cls):
         try:
             return cls._instance
@@ -40,7 +39,6 @@ class Anything(Constraint, Singleton):
 
 class Require(Constraint, namedtuple('Required', 'dtype')):
     """Used for fields that must be of a given type."""
-    __slots__ = ()
     def check(self, value):
         if not isinstance(value, self.dtype):
             raise TypeError("expected type %s, got %s" %
